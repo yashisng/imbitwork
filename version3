@@ -1,0 +1,109 @@
+import os
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import matplotlib.pyplot as plt
+
+def find_txt_files(directory, required_files):
+    files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.txt') and f in required_files]
+    files.sort(key=lambda x: required_files.index(os.path.basename(x)))
+    return files
+
+def browse_button():
+    folder_path = filedialog.askdirectory()
+    entry_path.delete(0, tk.END)
+    entry_path.insert(tk.END, folder_path)
+
+def process_files():
+    parent_folder = entry_path.get()
+    required_files = ["FS-X1.txt", "FS-X2.txt", "BS-X1.txt", "BS-X2.txt"]
+    all_txt_files = find_txt_files(parent_folder, required_files)
+    if not all_txt_files:
+        messagebox.showerror("Error", "No .txt files found in the selected folder.")
+        return
+    dfs = read_files_to_dataframes(all_txt_files)
+    split_dfs_list = split_dataframe_on_pattern2(dfs, "Column 1", "Column 1")
+    combined_df = create_combined_dataframe(split_dfs_list, required_files)
+    output_file = entry_output.get()
+    output_folder = os.path.dirname(all_txt_files[0])
+    output_file = os.path.join(output_folder, output_file)
+    if not output_file.endswith('.csv'):
+        output_file += '.csv'
+    try:
+        combined_df.to_csv(output_file, index=False)
+        generate_graphs(combined_df)
+        messagebox.showinfo("Success", "Files processed and saved successfully.")
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+def read_files_to_dataframes(files):
+    dataframes = []
+    for file in files:
+        df = pd.read_csv(file, sep=";")
+        dataframes.append(df)
+    return dataframes
+
+def split_dataframe_on_pattern2(list_of_dfs, pattern_column, pattern):
+    split_dfs_list = []
+    for df in list_of_dfs:
+        split_dfs = []
+        current_split = pd.DataFrame()
+        for index, row in df.iterrows():
+            if not pd.isnull(row[pattern_column]) and pattern in str(row[pattern_column]):
+                if not current_split.empty:
+                    split_dfs.append(current_split)
+                    current_split = pd.DataFrame()
+                continue
+            current_split = pd.concat([current_split, row.to_frame().T])
+        if not current_split.empty:
+            split_dfs.append(current_split)
+        split_dfs_list.append(split_dfs)
+    return split_dfs_list
+
+def create_combined_dataframe(split_dfs_list, required_files):
+    combined_df = split_dfs_list[0][0][["Frequency (Hz)"]].copy()
+    for i, split_dfs in enumerate(split_dfs_list):
+        for j, df in enumerate(split_dfs):
+            file_name = os.path.basename(required_files[i]).replace(".txt", "")
+            column_name = f"{file_name} [{j+1}]"
+            combined_df = pd.merge(combined_df, df[["Frequency (Hz)", "Z (Ω)"]], on="Frequency (Hz)", how="left")
+            combined_df = combined_df.rename(columns={"Z (Ω)": column_name})
+    return combined_df
+
+def generate_graphs(combined_df):
+    plt.figure(figsize=(10, 6))
+    for column in combined_df.columns[1:]:
+        plt.plot(combined_df["Frequency (Hz)"], combined_df[column], label=column)
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("Z (Ω)")
+    plt.title("Frequency vs Impedance")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+root = tk.Tk()
+root.title("File Processor")
+
+frame_path = tk.Frame(root)
+frame_path.pack(pady=10)
+frame_output = tk.Frame(root)
+frame_output.pack(pady=10)
+frame_buttons = tk.Frame(root)
+frame_buttons.pack(pady=10)
+
+label_path = tk.Label(frame_path, text="Select Folder Path:")
+label_path.pack(side=tk.LEFT)
+entry_path = tk.Entry(frame_path, width=50)
+entry_path.pack(side=tk.LEFT)
+button_browse = tk.Button(frame_path, text="Browse", command=browse_button)
+button_browse.pack(side=tk.LEFT)
+
+label_output = tk.Label(frame_output, text="Output File Name:")
+label_output.pack(side=tk.LEFT)
+entry_output = tk.Entry(frame_output, width=30)
+entry_output.pack(side=tk.LEFT)
+
+button_process = tk.Button(frame_buttons, text="Process Files", command=process_files)
+button_process.pack()
+
+root.mainloop()
